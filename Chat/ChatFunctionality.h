@@ -1,67 +1,107 @@
 #pragma once
 
-#include "User.h"
-#include "Message.h"
-#include <unordered_map>
+#include <iostream>
+#include <string>
 #include <vector>
 #include <stdexcept>
-#include <iostream>
+#include <cmath>
+#include "User.h"
+#include "Message.h"
+
+// РџСЂРѕСЃС‚Р°СЏ С…РµС€-С„СѓРЅРєС†РёСЏ РјРµС‚РѕРґРѕРј СѓРјРЅРѕР¶РµРЅРёСЏ
+size_t hashFunction(const std::string& key, size_t tableSize) {
+    const double A = 0.6180339887; // РљРѕРЅСЃС‚Р°РЅС‚Р° A (1 - Р·РѕР»РѕС‚РѕРµ СЃРµС‡РµРЅРёРµ)
+    double fracPart = fmod(key.length() * A, 1.0); // Р”СЂРѕР±РЅР°СЏ С‡Р°СЃС‚СЊ
+    return static_cast<size_t>(tableSize * fracPart);
+}
 
 class Chat {
 private:
-    std::unordered_map<std::string, User*> users;
-    std::vector<Message> messages;
+    struct HashEntry {
+        std::string username;
+        std::string passwordHash;
+        bool occupied = false;
+        bool deleted = false;
+    };
+
+    std::vector<HashEntry> hashTable;
+    size_t userCount = 0;
+
+    // РҐРµС€-С‚Р°Р±Р»РёС†Р° СѓРІРµР»РёС‡РёРІР°РµС‚СЃСЏ РїСЂРё РїСЂРµРІС‹С€РµРЅРёРё РєРѕСЌС„С„РёС†РёРµРЅС‚Р° Р·Р°РїРѕР»РЅРµРЅРёСЏ
+    void resizeTable() {
+        size_t newSize = hashTable.size() * 2 + 1;
+        std::vector<HashEntry> newTable(newSize);
+
+        for (const auto& entry : hashTable) {
+            if (entry.occupied && !entry.deleted) {
+                size_t index = hashFunction(entry.username, newSize);
+                size_t i = 0;
+
+                while (newTable[index].occupied) {
+                    index = (index + i * i) % newSize;
+                    ++i;
+                }
+
+                newTable[index] = entry;
+            }
+        }
+
+        hashTable = std::move(newTable);
+    }
 
 public:
-    // Регистрация пользователя
+    Chat(size_t initialSize = 11) : hashTable(initialSize) {}
+
+    // Р РµРіРёСЃС‚СЂР°С†РёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
     void registerUser(const std::string& username, const std::string& password, const std::string& name) {
-        if (users.find(username) != users.end()) {
-            throw std::runtime_error("Пользователь с таким логином уже существует!");
+        if (userCount >= hashTable.size() / 2) {
+            resizeTable();
         }
-        users[username] = new User(username, password, name);
-        std::cout << "Пользователь " << name << " зарегистрирован." << std::endl;
+
+        size_t index = hashFunction(username, hashTable.size());
+        size_t i = 0;
+
+        while (hashTable[index].occupied && !hashTable[index].deleted) {
+            if (hashTable[index].username == username) {
+                throw std::runtime_error("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ С‚Р°РєРёРј Р»РѕРіРёРЅРѕРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚!");
+            }
+            index = (index + i * i) % hashTable.size();
+            ++i;
+        }
+
+        hashTable[index] = { username, password, true, false };
+        ++userCount;
+
+        std::cout << "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ " << name << " Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ." << std::endl;
     }
 
-    // Авторизация пользователя
+    // РђРІС‚РѕСЂРёР·Р°С†РёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
     User* authenticateUser(const std::string& username, const std::string& password) {
-        auto it = users.find(username);
-        if (it != users.end() && it->second->password == password) {
-            return it->second;
+        size_t index = hashFunction(username, hashTable.size());
+        size_t i = 0;
+
+        while (hashTable[index].occupied || hashTable[index].deleted) {
+            if (hashTable[index].occupied && !hashTable[index].deleted && hashTable[index].username == username) {
+                if (hashTable[index].passwordHash == password) {
+                    return new User(username, password, username);
+                }
+                else {
+                    throw std::runtime_error("РќРµРІРµСЂРЅС‹Р№ РїР°СЂРѕР»СЊ!");
+                }
+            }
+            index = (index + i * i) % hashTable.size();
+            ++i;
         }
-        throw std::runtime_error("Неверный логин или пароль!");
+
+        throw std::runtime_error("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ!");
     }
 
-    // Отправка сообщения
-    void sendMessage(User* sender, User* recipient, const std::string& content) {
-        if (users.find(recipient->username) == users.end()) {
-            throw std::runtime_error("Получатель не найден!");
-        }
-        messages.push_back(Message(sender, recipient, content));
-    }
-    //Отправка сообщений всем
-    void sendMessageToAll(User* sender, const std::string& content) {
-        for (auto& pair : users) {
-            if (pair.second != sender) {
-                messages.push_back(Message(sender, pair.second, content));
+    // РћС‚РѕР±СЂР°Р¶РµРЅРёРµ РІСЃРµС… РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ (РґР»СЏ РѕС‚Р»Р°РґРєРё)
+    void displayUsers() const {
+        for (const auto& entry : hashTable) {
+            if (entry.occupied && !entry.deleted) {
+                std::cout << "Р›РѕРіРёРЅ: " << entry.username << ", РҐРµС€ РїР°СЂРѕР»СЏ: " << entry.passwordHash << std::endl;
             }
         }
     }
-
-    // Просмотр всех сообщений
-    void displayMessages() const {
-        if (messages.empty()) {
-            std::cout << "Сообщений нет." << std::endl;
-            return;
-        }
-        for (const auto& message : messages) {
-            message.display();
-        }
-    }
-
-    // Поиск пользователя по логину
-    User* findUserByUsername(const std::string& username) {
-        auto it = users.find(username);
-        return (it != users.end()) ? it->second : nullptr;
-    }
 };
-
