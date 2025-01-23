@@ -10,117 +10,61 @@ int main() {
     User* currentUser = nullptr;
 
     while (true) {
-        std::cout << "\n1. Регистрация\n2. Вход\n3. Отправить сообщение\n4. Отправить всем\n5. Просмотр сообщений\n6. Выход\n";
-        std::cout << "Выберите действие: ";
+        std::cout << "\n1. Р РµРіРёСЃС‚СЂР°С†РёСЏ\n2. Р’С…РѕРґ\n3. РџСЂРѕСЃРјРѕС‚СЂ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№\n4. Р’С‹С…РѕРґ\n";
+        std::cout << "Р’С‹Р±РµСЂРёС‚Рµ РґРµР№СЃС‚РІРёРµ: ";
         int choice;
         std::cin >> choice;
-        std::cin.ignore(); // Чтобы очистить буфер ввода после cin >> choice
+        std::cin.ignore(); // Р§С‚РѕР±С‹ РѕС‡РёСЃС‚РёС‚СЊ Р±СѓС„РµСЂ РІРІРѕРґР° РїРѕСЃР»Рµ cin >> choice
 
         switch (choice) {
-        case 1: {  // Регистрация
+        case 1: {  // Р РµРіРёСЃС‚СЂР°С†РёСЏ
             std::string username, password, name;
-            std::cout << "Введите логин: ";
+            std::cout << "Р’РІРµРґРёС‚Рµ Р»РѕРіРёРЅ: ";
             std::cin >> username;
-            std::cout << "Введите пароль: ";
+            std::cout << "Р’РІРµРґРёС‚Рµ РїР°СЂРѕР»СЊ: ";
             std::cin >> password;
-            std::cout << "Введите ваше имя: ";
-            std::cin.ignore();  // Чтобы очистить буфер после cin >> password
+            std::cout << "Р’РІРµРґРёС‚Рµ РІР°С€Рµ РёРјСЏ: ";
+            std::cin.ignore();  // Р§С‚РѕР±С‹ РѕС‡РёСЃС‚РёС‚СЊ Р±СѓС„РµСЂ РїРѕСЃР»Рµ cin >> password
             std::getline(std::cin, name);
 
             try {
                 chat.registerUser(username, password, name);
             }
             catch (const std::runtime_error& e) {
-                std::cout << "Ошибка: " << e.what() << std::endl;
+                std::cout << "РћС€РёР±РєР°: " << e.what() << std::endl;
             }
             break;
         }
 
-        case 2: {  // Вход
+        case 2: {  // Р’С…РѕРґ
             std::string username, password;
-            std::cout << "Введите логин: ";
+            std::cout << "Р’РІРµРґРёС‚Рµ Р»РѕРіРёРЅ: ";
             std::cin >> username;
-            std::cout << "Введите пароль: ";
+            std::cout << "Р’РІРµРґРёС‚Рµ РїР°СЂРѕР»СЊ: ";
             std::cin >> password;
 
             try {
                 currentUser = chat.authenticateUser(username, password);
-                std::cout << "Добро пожаловать, " << currentUser->name << "!" << std::endl;
+                std::cout << "Р”РѕР±СЂРѕ РїРѕР¶Р°Р»РѕРІР°С‚СЊ, " << currentUser->name << "!" << std::endl;
             }
             catch (const std::runtime_error& e) {
-                std::cout << "Ошибка: " << e.what() << std::endl;
+                std::cout << "РћС€РёР±РєР°: " << e.what() << std::endl;
             }
             break;
         }
 
-        case 3: {  // Отправить сообщение конкретному пользователю
-            if (!currentUser) {
-                std::cout << "Пожалуйста, войдите в систему, чтобы отправлять сообщения." << std::endl;
-                break;
-            }
-
-            std::string recipientName, content;
-            std::cout << "Введите логин получателя: ";
-            std::cin >> recipientName;
-            std::cout << "Введите сообщение: ";
-            std::cin.ignore();  // Чтобы очистить буфер после cin >> recipientName
-            std::getline(std::cin, content);
-
-            User* recipient = chat.findUserByUsername(recipientName);
-            if (!recipient) {
-                std::cout << "Пользователь с таким логином не найден." << std::endl;
-                break;
-            }
-
-            try {
-                chat.sendMessage(currentUser, recipient, content);
-                std::cout << "Сообщение отправлено!" << std::endl;
-            }
-            catch (const std::runtime_error& e) {
-                std::cout << "Ошибка: " << e.what() << std::endl;
-            }
+        case 3: {  // РџСЂРѕСЃРјРѕС‚СЂ РІСЃРµС… РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ (РґР»СЏ РѕС‚Р»Р°РґРєРё)
+            chat.displayUsers();
             break;
         }
 
-        case 4: {  // Отправить сообщение всем пользователям
-            if (!currentUser) {
-                std::cout << "Пожалуйста, войдите в систему, чтобы отправлять сообщения." << std::endl;
-                break;
-            }
-
-            std::string content;
-            std::cout << "Введите сообщение, которое будет отправлено всем пользователям: ";
-            std::cin.ignore();  // Чтобы очистить буфер после cin
-            std::getline(std::cin, content);
-
-            try {
-                chat.sendMessageToAll(currentUser, content);
-                std::cout << "Сообщение отправлено всем пользователям!" << std::endl;
-            }
-            catch (const std::runtime_error& e) {
-                std::cout << "Ошибка: " << e.what() << std::endl;
-            }
-            break;
-        }
-
-        case 5: {  // Просмотр сообщений
-            if (!currentUser) {
-                std::cout << "Пожалуйста, войдите в систему, чтобы просматривать сообщения." << std::endl;
-                break;
-            }
-
-            std::cout << "Все сообщения: " << std::endl;
-            chat.displayMessages();
-            break;
-        }
-
-        case 6: {  // Выход
-            std::cout << "Выход из программы...\n";
+        case 4: {  // Р’С‹С…РѕРґ
+            std::cout << "Р’С‹С…РѕРґ РёР· РїСЂРѕРіСЂР°РјРјС‹...\n";
             return 0;
         }
 
         default:
-            std::cout << "Неверный выбор! Попробуйте снова.\n";
+            std::cout << "РќРµРІРµСЂРЅС‹Р№ РІС‹Р±РѕСЂ! РџРѕРїСЂРѕР±СѓР№С‚Рµ СЃРЅРѕРІР°.\n";
         }
     }
 
