@@ -8,12 +8,10 @@ public:
     std::string username;
     std::string password;
     std::string name;
-
-    // Конструктор
     User(std::string uname, std::string pass, std::string fullname)
-        : username(uname), password(pass), name(fullname) {}
-
-    // Вывод информации о пользователе
+        : username(uname), password(pass), name(fullname) {
+    }
+    // Р’С‹РІРѕРґ РёРЅС„РѕСЂРјР°С†РёРё Рѕ РїРѕР»СЊР·РѕРІР°С‚РµР»Рµ
     void display() const {
         std::cout << name << " (" << username << ")" << std::endl;
     }
