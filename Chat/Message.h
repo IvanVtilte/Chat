@@ -10,13 +10,13 @@ public:
     User* recipient;
     std::string content;
 
-    // Конструктор
+    // РљРѕРЅСЃС‚СЂСѓРєС‚РѕСЂ
     Message(User* sender, User* recipient, const std::string& msg)
-        : sender(sender), recipient(recipient), content(msg) {}
+        : sender(sender), recipient(recipient), content(msg) {
+    }
 
-    // Вывод сообщения
+    // Р’С‹РІРѕРґ СЃРѕРѕР±С‰РµРЅРёСЏ
     void display() const {
         std::cout << sender->username << " to " << recipient->username << ": " << content << std::endl;
     }
 };
-
