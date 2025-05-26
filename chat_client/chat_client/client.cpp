@@ -1,15 +1,13 @@
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#include <iostream>
-#include <string>
 #include <winsock2.h>
 #include <mysql_driver.h>
 #include <mysql_connection.h>
-#include <cppconn/statement.h>
-#include <thread>
 #include <vector>
+#include <thread>
 #include <cppconn/driver.h>
 #include <cppconn/connection.h>
+#include <cppconn/statement.h>
 #include <cppconn/exception.h>
+#include <iostream>
 #include <stdexcept>
 #include <mutex>
 #include <fstream>
@@ -17,207 +15,155 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include "Logger.h"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "mysqlcppconn")
 
 #define PORT 12345
-#define BUFFER_SIZE 1024
+#define MAX_CLIENTS 10
 
-class Logger {
-private:
-    std::fstream log_file;
-    mutable std::shared_mutex file_mutex;
+std::vector<SOCKET> clients;
+std::mutex clients_mutex;
+Logger logger("server_log.txt");
 
-    std::string get_current_time() {
-        auto now = std::chrono::system_clock::now();
-        auto in_time_t = std::chrono::system_clock::to_time_t(now);
-
-        std::stringstream ss;
-        ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %X");
-        return ss.str();
-    }
-
-public:
-    Logger(const std::string& filename) {
-        log_file.open(filename, std::ios::in | std::ios::out | std::ios::app);
-        if (!log_file.is_open()) {
-            throw std::runtime_error("Не удалось открыть файл логов");
+void broadcast(const std::string& message, SOCKET sender) {
+    std::lock_guard<std::mutex> guard(clients_mutex);
+    for (SOCKET client : clients) {
+        if (client != sender) {
+            send(client, message.c_str(), message.size() + 1, 0);
         }
-    }
-
-    ~Logger() {
-        std::unique_lock<std::shared_mutex> lock(file_mutex);
-        if (log_file.is_open()) {
-            log_file.close();
-        }
-    }
-
-    void write_log(const std::string& message) {
-        std::unique_lock<std::shared_mutex> lock(file_mutex);
-        if (log_file.is_open()) {
-            log_file << "[" << get_current_time() << "] " << message << std::endl;
-        }
-    }
-
-    std::string read_log() {
-        std::string line;
-        std::shared_lock<std::shared_mutex> lock(file_mutex);
-        if (log_file.is_open()) {
-            log_file.seekg(0, std::ios::beg);
-            std::getline(log_file, line);
-        }
-        return line;
-    }
-
-    Logger(const Logger&) = delete;
-    Logger& operator=(const Logger&) = delete;
-};
-
-Logger logger("client_log.txt");
-
-void receive_messages(SOCKET sock) {
-    char buffer[BUFFER_SIZE];
-    while (true) {
-        int bytes = recv(sock, buffer, BUFFER_SIZE, 0);
-        if (bytes <= 0) break;
-        buffer[bytes] = '\0';
-        std::string message = "Получено: " + std::string(buffer);
-        std::cout << message << std::endl;
-        logger.write_log(message);
     }
 }
 
-int main() {
-    setlocale(LC_ALL, "ru");
-
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        logger.write_log("Ошибка инициализации Winsock");
-        std::cerr << "Ошибка инициализации Winsock" << std::endl;
-        return 1;
+void handle_client(SOCKET client_sock, sql::Connection* conn) {
+    {
+        std::lock_guard<std::mutex> guard(clients_mutex);
+        clients.push_back(client_sock);
     }
 
-    sql::mysql::MySQL_Driver* mysql_driver;
-    sql::Connection* mysql_conn;
-    try {
-        mysql_driver = sql::mysql::get_mysql_driver_instance();
-        mysql_conn = mysql_driver->connect("tcp://127.0.0.1:3306", "root", "13131");
-        mysql_conn->setSchema("chatdb");
-        logger.write_log("Подключение к базе данных успешно");
-    }
-    catch (sql::SQLException& e) {
-        logger.write_log("Ошибка MySQL: " + std::string(e.what()));
-        std::cerr << "Ошибка MySQL: " << e.what() << std::endl;
-        WSACleanup();
-        return 1;
-    }
-
-    SOCKET reg_sock = socket(AF_INET, SOCK_STREAM, 0);
-    sockaddr_in server_addr{};
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
-    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    if (connect(reg_sock, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-        logger.write_log("Ошибка подключения к серверу");
-        std::cerr << "Ошибка подключения к серверу" << std::endl;
-        delete mysql_conn;
-        WSACleanup();
-        return 1;
-    }
-
-    SOCKET chat_sock = INVALID_SOCKET;
-    std::string current_user;
-
+    char buffer[1024];
     while (true) {
-        std::cout << "\n1. Регистрация\n2. Вход\n3. Отправить сообщение\n4. Просмотреть логи\n0. Выход\nВыберите: ";
-        int choice;
-        std::cin >> choice;
-        std::cin.ignore();
+        int bytes = recv(client_sock, buffer, sizeof(buffer), 0);
+        if (bytes <= 0) break;
 
-        if (choice == 0) break;
+        buffer[bytes] = '\0';
+        std::string message(buffer);
 
-        std::string login, password;
-        if (choice == 1 || choice == 2) {
-            std::cout << "Логин: ";
-            std::getline(std::cin, login);
-            std::cout << "Пароль: ";
-            std::getline(std::cin, password);
-        }
+        if (message.find("REGISTER|") == 0) {
+            size_t pos = message.find('|', 9);
+            if (pos != std::string::npos) {
+                std::string login = message.substr(9, pos - 9);
+                std::string password = message.substr(pos + 1);
 
-        if (choice == 1) {
-            std::string data = "REGISTER|" + login + "|" + password;
-            send(reg_sock, data.c_str(), data.size() + 1, 0);
-            logger.write_log("Попытка регистрации пользователя: " + login);
-
-            char response[BUFFER_SIZE];
-            recv(reg_sock, response, BUFFER_SIZE, 0);
-            std::string response_msg = "Ответ сервера: " + std::string(response);
-            std::cout << response_msg << std::endl;
-            logger.write_log(response_msg);
-        }
-        else if (choice == 2) {
-            sql::Statement* stmt = mysql_conn->createStatement();
-            sql::ResultSet* res = stmt->executeQuery(
-                "SELECT 1 FROM users WHERE user_name='" + login +
-                "' AND user_password='" + password + "'");
-
-            if (res->next()) {
-                std::string success_msg = "Успешный вход пользователя: " + login;
-                std::cout << success_msg << std::endl;
-                logger.write_log(success_msg);
-                current_user = login;
-
-                chat_sock = socket(AF_INET, SOCK_STREAM, 0);
-                if (connect(chat_sock, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-                    logger.write_log("Ошибка подключения к чату");
-                    std::cerr << "Ошибка подключения к чату" << std::endl;
-                    chat_sock = INVALID_SOCKET;
+                try {
+                    sql::Statement* stmt = conn->createStatement();
+                    stmt->execute("INSERT INTO users(user_name, user_password) VALUES('" +
+                        login + "','" + password + "')");
+                    send(client_sock, "OK", 2, 0);
+                    logger.write_log("Зарегистрирован новый пользователь: " + login);
+                    delete stmt;
                 }
-                else {
-                    logger.write_log("Успешное подключение к чату");
-                    std::thread(receive_messages, chat_sock).detach();
+                catch (const sql::SQLException& e) {
+                    logger.write_log("Ошибка регистрации: " + std::string(e.what()));
+                    send(client_sock, "ERROR", 5, 0);
                 }
             }
-            else {
-                std::string error_msg = "Ошибка входа: неверный логин или пароль";
-                std::cout << error_msg << std::endl;
-                logger.write_log(error_msg);
-            }
-
-            delete res;
-            delete stmt;
         }
-        else if (choice == 3) {
-            if (chat_sock == INVALID_SOCKET) {
-                std::cout << "Сначала войдите в систему" << std::endl;
+        else {
+            logger.write_log("Получено сообщение: " + message);
+            broadcast(message, client_sock);
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> guard(clients_mutex);
+        clients.erase(std::remove(clients.begin(), clients.end(), client_sock), clients.end());
+    }
+    closesocket(client_sock);
+    logger.write_log("Клиент отключился");
+}
+
+int main() {
+    SOCKET server_socket = INVALID_SOCKET;
+    sql::Connection* conn = nullptr;
+    std::vector<std::thread> client_threads;
+
+    try {
+        setlocale(LC_ALL, "ru");
+
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+            throw std::runtime_error("Ошибка инициализации Winsock");
+        }
+
+        try {
+            sql::mysql::MySQL_Driver* driver = sql::mysql::get_mysql_driver_instance();
+            conn = driver->connect("tcp://127.0.0.1:3306", "root", "13131");
+            conn->setSchema("chatdb");
+            logger.write_log("Подключение к базе данных успешно");
+        }
+        catch (const sql::SQLException& e) {
+            throw std::runtime_error("Ошибка MySQL: " + std::string(e.what()));
+        }
+
+        server_socket = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_socket == INVALID_SOCKET) {
+            throw std::runtime_error("Ошибка создания сокета");
+        }
+
+        sockaddr_in server_addr;
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_addr.s_addr = INADDR_ANY;
+        server_addr.sin_port = htons(PORT);
+
+        if (bind(server_socket, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+            throw std::runtime_error("Ошибка привязки сокета");
+        }
+
+        if (listen(server_socket, MAX_CLIENTS) == SOCKET_ERROR) {
+            throw std::runtime_error("Ошибка прослушивания порта");
+        }
+
+        logger.write_log("Сервер запущен. Ожидание подключений...");
+        std::cout << "Сервер запущен. Ожидание подключений..." << std::endl;
+
+        while (true) {
+            SOCKET client_socket = accept(server_socket, NULL, NULL);
+            if (client_socket == INVALID_SOCKET) {
                 continue;
             }
 
-            std::string message;
-            std::cout << "Сообщение: ";
-            std::getline(std::cin, message);
-            message = current_user + ": " + message;
-            send(chat_sock, message.c_str(), message.size() + 1, 0);
-            logger.write_log("Отправлено сообщение: " + message);
-        }
-        else if (choice == 4) {
-            std::cout << "\n=== Логи клиента ===" << std::endl;
-            std::ifstream log_file("client_log.txt");
-            std::string line;
-            while (std::getline(log_file, line)) {
-                std::cout << line << std::endl;
-            }
-            std::cout << "===================" << std::endl;
+            logger.write_log("Новое подключение клиента");
+            client_threads.emplace_back(handle_client, client_socket, conn);
         }
     }
+    catch (const std::exception& e) {
+        logger.write_log("Критическая ошибка: " + std::string(e.what()));
+        std::cerr << "Критическая ошибка: " << e.what() << std::endl;
 
-    logger.write_log("Завершение работы клиента");
-    delete mysql_conn;
-    closesocket(reg_sock);
-    if (chat_sock != INVALID_SOCKET) {
-        closesocket(chat_sock);
+        if (server_socket != INVALID_SOCKET) {
+            closesocket(server_socket);
+        }
+        if (conn) {
+            delete conn;
+        }
+
+        for (auto& thread : client_threads) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+
+        WSACleanup();
+        return 1;
+    }
+
+    if (server_socket != INVALID_SOCKET) {
+        closesocket(server_socket);
+    }
+    if (conn) {
+        delete conn;
     }
     WSACleanup();
     return 0;
