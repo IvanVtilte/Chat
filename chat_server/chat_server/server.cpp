@@ -15,62 +15,13 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include "Logger.h"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "mysqlcppconn")
 
 #define PORT 12345
 #define MAX_CLIENTS 10
-
-class Logger {
-private:
-    std::fstream log_file;
-    mutable std::shared_mutex file_mutex;
-
-    std::string get_current_time() {
-        auto now = std::chrono::system_clock::now();
-        auto in_time_t = std::chrono::system_clock::to_time_t(now);
-
-        std::stringstream ss;
-        ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %X");
-        return ss.str();
-    }
-
-public:
-    Logger(const std::string& filename) {
-        log_file.open(filename, std::ios::in | std::ios::out | std::ios::app);
-        if (!log_file.is_open()) {
-            throw std::runtime_error("Не удалось открыть файл логов");
-        }
-    }
-
-    ~Logger() {
-        std::unique_lock<std::shared_mutex> lock(file_mutex);
-        if (log_file.is_open()) {
-            log_file.close();
-        }
-    }
-
-    void write_log(const std::string& message) {
-        std::unique_lock<std::shared_mutex> lock(file_mutex);
-        if (log_file.is_open()) {
-            log_file << "[" << get_current_time() << "] " << message << std::endl;
-        }
-    }
-
-    std::string read_log() {
-        std::string line;
-        std::shared_lock<std::shared_mutex> lock(file_mutex);
-        if (log_file.is_open()) {
-            log_file.seekg(0, std::ios::beg);
-            std::getline(log_file, line);
-        }
-        return line;
-    }
-
-    Logger(const Logger&) = delete;
-    Logger& operator=(const Logger&) = delete;
-};
 
 std::vector<SOCKET> clients;
 std::mutex clients_mutex;
